@@ -1,0 +1,27 @@
+# The "app of apps" root: ArgoCD watches gitops/ in this same repo, and
+# treats whatever Application/ApplicationSet manifests it finds there as
+# things to manage. Update repoURL/targetRevision to match your repo, and
+# see bootstrap/README.md for the one-time repo-credentials step ArgoCD
+# needs before this can sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:sl31pn1r/aionk8s.git
+    targetRevision: master
+    path: gitops
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

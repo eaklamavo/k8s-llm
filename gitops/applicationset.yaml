@@ -1,0 +1,45 @@
+# =============================================================================
+# ApplicationSet: git directory generator
+#
+# Watches gitops/ in the repo. Every subdirectory that contains a
+# kustomization.yaml becomes a separate ArgoCD Application automatically.
+# Adding a new demo component is as simple as adding a new folder with a
+# kustomization.yaml - ArgoCD picks it up on the next sync.
+#
+# Demo talking point: this is the GitOps delivery layer. The platform team
+# owns the ApplicationSet definition; app teams add folders. No manual
+# ArgoCD Application creation needed.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ai-demos
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: git@github.com:sl31pn1r/aionk8s.git
+        revision: master
+        directories:
+          - path: gitops/*
+  template:
+    metadata:
+      name: "{{path.basename}}"
+      labels:
+        app.kubernetes.io/managed-by: argocd
+        demo: ai-platform
+    spec:
+      project: default
+      source:
+        repoURL: git@github.com:sl31pn1r/aionk8s.git
+        targetRevision: master
+        path: "{{path}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: ai-demos
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

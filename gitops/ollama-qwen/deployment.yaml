@@ -1,0 +1,102 @@
+# =============================================================================
+# Ollama - Qwen2.5-7B-Instruct-Q4 (CPU inference, larger model demo)
+#
+# This is the second Ollama deployment, used while GPU quota is pending
+# OR as a permanent CPU-based alternative to vLLM.
+#
+# Deployed alongside ollama-tinyllama in the same namespace. OpenWebUI
+# will show both as separate models in the dropdown:
+#   tinyllama  <- fast, use for HPA/autoscaling demo
+#   qwen2.5:7b <- slower on CPU but demonstrates the model swap story
+#
+# TO SWAP THE MODEL: change OLLAMA_MODEL below. Same pattern as
+# ollama-tinyllama/deployment.yaml - one env var, one line.
+#
+# CPU performance expectation on D4s_v4 (4 vCPU):
+#   ~2-4 tokens/second - noticeably slower than GPU (30-50 tok/s)
+#   "same model, same API, 10x faster on GPU"
+# the latency difference IS the point.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-qwen
+  namespace: ai-demos
+  labels:
+    app: ollama-qwen
+    model: qwen2.5-7b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama-qwen
+  template:
+    metadata:
+      labels:
+        app: ollama-qwen
+        model: qwen2.5-7b
+    spec:
+      initContainers:
+        - name: pull-model
+          image: ollama/ollama:latest
+          command: ["sh", "-c", "ollama serve & sleep 5 && ollama pull qwen2.5:7b-instruct-q4_K_M && kill %1 || true"]
+          env:
+            - name: OLLAMA_MODEL
+              value: "tinyllama"
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          env:
+            # =================================================================
+            # SWAP MODEL HERE
+            # =================================================================
+            - name: OLLAMA_MODEL
+              value: "qwen2.5:7b-instruct-q4_K_M"
+            # Limit parallelism on CPU to avoid starving other pods
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "6Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            # Qwen 7B takes longer to pull than TinyLlama
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 10
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+      volumes:
+        - name: ollama-models
+          emptyDir: {}
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload
+                    operator: NotIn
+                    values:
+                      - gpu

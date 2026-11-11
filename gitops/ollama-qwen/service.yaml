@@ -1,0 +1,21 @@
+# Separate ClusterIP service for the Qwen instance.
+# OpenWebUI is configured to talk to http://ollama:11434 (TinyLlama).
+# To also expose Qwen to OpenWebUI, add it as an additional Ollama
+# connection in the OpenWebUI admin settings:
+#   Admin > Settings > Connections > Add Ollama > http://ollama-qwen:11434
+# Both models then appear in the dropdown as separate entries.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-qwen
+  namespace: ai-demos
+  labels:
+    app: ollama-qwen
+spec:
+  type: ClusterIP
+  selector:
+    app: ollama-qwen
+  ports:
+    - name: http
+      port: 11434
+      targetPort: 11434

@@ -1,0 +1,48 @@
+# Copy to terraform.tfvars and adjust. Do not commit terraform.tfvars if it
+# contains anything sensitive, the SSH key in particular is passed via the
+# TF_VAR_flux_git_ssh_private_key_base64 environment variable, not here.
+
+project     = "cnandk8s"
+landscape   = "sbox"
+region_code = "swec"
+location    = "swedencentral"
+sequence    = "01"
+
+# Pluralsight sandboxes provide one pre-existing resource group. Set its
+# name here once you know it (check `az group list -o table` at lab start).
+# Leave as null to have this module create its own resource group instead.
+resource_group_name = null
+
+vnet_address_space = ["10.20.0.0/16"]
+
+subnets = {
+  aks = {
+    purpose          = "k8snodes"
+    address_prefixes = ["10.20.0.0/22"]
+  }
+}
+
+system_node_pool = {
+  vm_size    = "Standard_D4s_v4"
+  node_count = 2
+  min_count  = 1
+  max_count  = 3
+}
+
+gpu_node_pool = {
+  vm_size   = "Standard_NC4as_T4_v3"
+  min_count = 1
+  max_count = 2
+}
+
+# Set to false if NC quota is still pending approval.
+# The Ollama/TinyLlama example works without it.
+gpu_node_pool_enabled = true
+
+flux_git_repository_url = "git@github.com:sl31pn1r/aionk8s.git"
+flux_git_branch         = "master"
+flux_bootstrap_path     = "./bootstrap"
+
+tags = {
+  demo = "ai-platform-engineering"
+}

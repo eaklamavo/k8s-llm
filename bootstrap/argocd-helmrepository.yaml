@@ -1,0 +1,9 @@
+# Flux source: the argo-helm chart repository, used by argocd-helmrelease.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: argo-helm
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://argoproj.github.io/argo-helm

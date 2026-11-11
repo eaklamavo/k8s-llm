@@ -1,0 +1,55 @@
+# =============================================================================
+# HPA - Ollama autoscaling demo
+#
+# Scales Ollama replicas based on CPU utilisation.
+# Target 50%: a couple of concurrent requests will push above this and
+# trigger a visible scale event during the demo.
+#
+# This is pod-level autoscaling. Kubernetes adds
+# replicas when demand increases, removes them when it drops. This is fast
+# (seconds to minutes) compared to node-level autoscaling (5-10 minutes
+# for a new GPU node to provision and register).
+#
+# To trigger scaling live:
+#   # Install hey if not present: go install github.com/rakyll/hey@latest
+#   hey -z 60s -c 5 http://<ollama-clusterip>:11434/api/generate \
+#     -m POST \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"tinyllama","prompt":"explain kubernetes in one sentence","stream":false}'
+#
+# Then watch:
+#   kubectl get hpa ollama -n ai-demos --watch
+#   kubectl get pods -n ai-demos --watch
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ollama
+  namespace: ai-demos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ollama
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

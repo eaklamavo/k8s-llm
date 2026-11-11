@@ -1,0 +1,21 @@
+# ClusterIP - internal only. OpenWebUI reaches vLLM via http://vllm:8000/v1
+# vLLM exposes an OpenAI-compatible API, so OpenWebUI treats it as an
+# OpenAI endpoint. Same API, different backend.
+#
+# The OpenAI-compatible API means any app already
+# written for OpenAI works with vLLM without code changes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-serv
+  namespace: ai-demos
+  labels:
+    app: vllm
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

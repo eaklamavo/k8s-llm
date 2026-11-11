@@ -1,0 +1,98 @@
+# =============================================================================
+# Ollama - TinyLlama (CPU inference)
+#
+# TO SWAP THE MODEL: change the OLLAMA_MODEL env var below to any model
+# name from https://ollama.com/library (e.g. qwen2.5:7b, phi3.5, mistral).
+# Ollama pulls the model automatically on first request.
+# No other file needs to change.
+#
+# This is the CPU inference path. No GPU required with small model.
+# TinyLlama (~640MB) starts fast and responds in seconds on CPU.
+# Watch the HPA scale replicas under load (see hpa.yaml).
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ai-demos
+  labels:
+    app: ollama
+    model: tinyllama        # <-- update this label if you swap the model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        model: tinyllama
+    spec:
+      initContainers:
+        - name: pull-model
+          image: ollama/ollama:latest
+          command: ["sh", "-c", "ollama serve & sleep 5 && ollama pull tinyllama && kill %1 || true"]
+          env:
+            - name: OLLAMA_MODEL
+              value: "tinyllama"
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          env:
+            # =================================================================
+            # SWAP MODEL HERE
+            # Change this value to use a different model from ollama.com/library
+            # Examples:
+            #   tinyllama          ~640MB  fastest, CPU friendly
+            #   phi3.5             ~2.2GB  good quality, still CPU viable
+            #   qwen2.5:7b         ~4.5GB  requires more RAM, better with GPU
+            #   llama3.2:3b        ~2.0GB  Meta model, ungated on Ollama
+            # =================================================================
+            - name: OLLAMA_MODEL
+              value: "tinyllama"
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+      volumes:
+        # emptyDir is fine for a demo - model re-downloads if pod restarts.
+        # For a persistent demo environment replace with a PVC.
+        - name: ollama-models
+          emptyDir: {}
+      # Prefer to land on system nodes (no GPU taint) but don't require it.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload
+                    operator: NotIn
+                    values:
+                      - gpu

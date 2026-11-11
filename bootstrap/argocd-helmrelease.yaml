@@ -1,0 +1,37 @@
+# Installs ArgoCD via Helm. Once this is Ready, ArgoCD's repo-server still
+# needs read access to this private repo before app-of-apps.yaml can sync,
+# see bootstrap/README.md for the one-time step.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argocd
+  namespace: flux-system
+spec:
+  interval: 30m
+  targetNamespace: argocd
+  chart:
+    spec:
+      chart: argo-cd
+      version: ">=7.0.0 <8.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: argo-helm
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+    createNamespace: true
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    configs:
+      params:
+        server.insecure: true
+    dex:
+      enabled: false
+    notifications:
+      enabled: false
+    server:
+      service:
+        type: LoadBalancer

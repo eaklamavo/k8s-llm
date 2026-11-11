@@ -1,0 +1,183 @@
+# =============================================================================
+# vLLM - Qwen2.5-7B-Instruct-AWQ (GPU inference)
+#
+# TO SWAP THE MODEL: change the --model argument in the args block below.
+# The model name must be a valid Hugging Face model ID. Point at this file
+# during the demo as "the single line you change to run a different model".
+#
+# Current model: Qwen/Qwen2.5-7B-Instruct-AWQ
+#   - AWQ 4-bit quantised: ~5.5GB VRAM (fits comfortably on T4 16GB)
+#   - Ungated: no Hugging Face token required
+#   - OpenAI-compatible API exposed on port 8000
+#
+# TO SWITCH TO LLAMA 3.1 8B (gated model):
+#   1. Store your HF token in Key Vault:
+#      az keyvault secret set --vault-name <kv-name> --name hf-token --value <token>
+#   2. Create a SecretProviderClass (see comments at bottom of this file)
+#   3. Change --model to meta-llama/Llama-3.1-8B-Instruct
+#   4. Uncomment the HF_TOKEN env var and volume sections below
+#   5. Change --quantization to bitsandbytes or remove it for full precision
+#      (full fp16 needs ~16GB VRAM, tight on T4 - use quantised)
+#
+# Demo
+#   - Tolerates the GPU taint: only lands on GPU nodes
+#   - PagedAttention + continuous batching: vLLM manages KV cache as pages,
+#     new requests join mid-flight without waiting for a batch boundary
+#   - OpenAI-compatible API: same /v1/chat/completions endpoint apps expect
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: ai-demos
+  labels:
+    app: vllm
+    model: qwen2.5-7b-awq    # <-- update if you swap the model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+        model: qwen2.5-7b-awq
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            # =================================================================
+            # SWAP MODEL HERE
+            # Must be a Hugging Face model ID. Examples:
+            #   Qwen/Qwen2.5-7B-Instruct-AWQ    ~5.5GB  ungated, fits T4
+            #   Qwen/Qwen2.5-3B-Instruct         ~3.0GB  smaller, faster
+            #   microsoft/Phi-3.5-mini-instruct  ~7.6GB  ungated, good quality
+            #   meta-llama/Llama-3.1-8B-Instruct ~16GB   gated, needs HF token
+            # =================================================================
+            - "Qwen/Qwen2.5-7B-Instruct-AWQ"
+            - "--quantization"
+            - "awq_marlin"
+            - "--max-model-len"
+            - "8192"
+            - "--gpu-memory-utilization"
+            - "0.90"
+            - "--served-model-name"
+            - "qwen2.5-7b"
+            - "--attention-backend" # required because "RuntimeError: BatchPrefillWithPagedKVCache failed with error invalid argument" T4 (compute capability 7.5) and the latest vLLM v0.23 has a compatibility issue.
+            - "TRITON_ATTN"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: "/tmp/hf-cache"
+            # Uncomment and configure the block below when using a gated
+            # model like Llama 3.1. Requires the Key Vault and
+            # SecretProviderClass setup described at the bottom of this file.
+            #
+            # - name: HF_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: hf-token
+            #       key: token
+          resources:
+            requests:
+              cpu: "2"
+              memory: "12Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: "14Gi"
+              nvidia.com/gpu: "1"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+          # ensuring vLLM has enough time to start up
+            initialDelaySeconds: 240
+            periodSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            # vLLM takes 2-3 minutes to load the model weights into VRAM
+            initialDelaySeconds: 180
+            periodSeconds: 20
+            failureThreshold: 15
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            # Uncomment when using Key Vault CSI for HF token:
+            # - name: hf-token-vol
+            #   mountPath: /mnt/secrets/hf-token
+            #   readOnly: true
+      volumes:
+        - name: hf-cache
+          emptyDir: {}
+        # Uncomment when using Key Vault CSI for HF token:
+        # - name: hf-token-vol
+        #   csi:
+        #     driver: secrets-store.csi.k8s.io
+        #     readOnly: true
+        #     volumeAttributes:
+        #       secretProviderClass: hf-token-spc
+      # GPU node affinity + toleration
+      # The GPU node pool is tainted nvidia.com/gpu=present:NoSchedule
+      # Only pods with this toleration will be scheduled there.
+      # Demo talking point: kubectl describe node <gpu-node> shows
+      # nvidia.com/gpu in Allocatable - the device plugin at work.
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Equal"
+          value: "present"
+          effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: agentpool
+                    operator: In
+                    values:
+                      - gpu
+
+# =============================================================================
+# HOW TO USE KEY VAULT CSI FOR HF TOKEN (for gated models like Llama 3.1)
+#
+# 1. Store the token (run once after terraform apply):
+#    az keyvault secret set \
+#      --vault-name <key_vault_name terraform output> \
+#      --name hf-token \
+#      --value <your-hf-token>
+#
+# 2. Create a SecretProviderClass in the ai-demos namespace:
+#
+#    apiVersion: secrets-store.csi.x-k8s.io/v1
+#    kind: SecretProviderClass
+#    metadata:
+#      name: hf-token-spc
+#      namespace: ai-demos
+#    spec:
+#      provider: azure
+#      parameters:
+#        usePodIdentity: "false"
+#        useVMManagedIdentity: "true"
+#        userAssignedIdentityID: ""   # leave empty for system-assigned
+#        keyvaultName: "<kv-name>"
+#        objects: |
+#          array:
+#            - |
+#              objectName: hf-token
+#              objectType: secret
+#        tenantId: "<tenant-id>"
+#      secretObjects:
+#        - secretName: hf-token
+#          type: Opaque
+#          data:
+#            - objectName: hf-token
+#              key: token
+#
+# 3. Uncomment the HF_TOKEN env var and volume sections in this Deployment.
+# =============================================================================
